@@ -8,8 +8,9 @@ namespace jumdata;
  */
 class Sms {
 
-    protected $app_id = null;
-    protected $app_secret = null;
+    protected $userName = null;
+    protected $password = null;
+    protected $httpGateway = null;
     // 调试模式
     protected $debug = false;
     /**
@@ -20,79 +21,25 @@ class Sms {
     protected $client;
 
 
-    public function __construct(string $app_id='', string $app_secret='', bool $debug=false)
+    /**
+     * @param string $userName 账号
+     * @param string $password 密码
+     * @param string $httpGateway 网关, 默认 http://119.23.144.191:8001/sms/,  结尾必须带 "/sms/"
+     * @param boolean $debug
+     */
+    public function __construct(string $userName='', string $password='', string $httpGateway = 'http://119.23.144.191:8001/sms/', bool $debug=false)
     {
-        $this->app_id = $app_id;
-        $this->app_secret = $app_secret;
+        var_dump(1);
+        $this->userName = $userName;
+        $this->password = $password;
+        $this->httpGateway = $httpGateway;
         $this->debug = $debug;
         $this->client = new \GuzzleHttp\Client([
-            'base_uri'        => 'https://api.jumdata.com',
+            'base_uri'        => $httpGateway,
             'timeout'         => 0,
-            'debug'           => $this->debug
+            'debug'           => $this->debug,
+            'verify'          => false,
         ]);
-    }
-
-
-    /**
-     * 发送短信通知
-     *
-     * @param string $mobile 手机号
-     * @param string $template_id 短信模板id
-     * @param array $tag 参数，用做替代模板中的@1@变量
-     * @return array [bool:success, array:responseArray]
-     * @throws \GuzzleHttp\Exception\*
-     */
-    public function send(string $mobile, string $template_id, array $tag=[]):array {
-        $data = [
-            ['name' => 'appId', 'contents'=>$this->app_id],
-            ['name' => 'timestamp', 'contents'=>time()*1000],
-            ['name' => 'receive', 'contents'=>$mobile],
-            ['name' => 'templateId', 'contents'=>$template_id],
-            ['name' => 'tag', 'contents'=>implode('|', $tag)],
-            ['name' => 'sign', 'contents'=>hash('sha256', $this->app_id . $this->app_secret . time()*1000)],
-        ];
-
-        $response = $this->client->post('/sms/send', ['multipart' => $data]);
-        $responseArr = json_decode($response->getBody()->getContents(), true);
-
-        $success = false;
-        if (isset($responseArr['success']) && $responseArr['success'] == true) {
-            $success = true;
-        }
-        
-        return [$success, $responseArr];
-    }
-
-
-    /**
-     * 发送短信通知 (支持携号转网, 比一般短信贵一厘)
-     *
-     * @param string $mobile 手机号
-     * @param string $template_id 短信模板id
-     * @param array $tag 参数，用做替代模板中的@1@变量
-     * @return array [bool:success, array:responseArray]
-     * @throws \GuzzleHttp\Exception\*
-     */
-    public function sendv2(string $mobile, string $template_id, array $tag = []): array
-    {
-        $data = [
-            ['name' => 'appId', 'contents' => $this->app_id],
-            ['name' => 'timestamp', 'contents' => time() * 1000],
-            ['name' => 'receive', 'contents' => $mobile],
-            ['name' => 'templateId', 'contents' => $template_id],
-            ['name' => 'tag', 'contents' => implode('|', $tag)],
-            ['name' => 'sign', 'contents' => hash('sha256', $this->app_id . $this->app_secret . time() * 1000)],
-        ];
-
-        $response = $this->client->post('/sms/send-v2', ['multipart' => $data]);
-        $responseArr = json_decode($response->getBody()->getContents(), true);
-
-        $success = false;
-        if (isset($responseArr['success']) && $responseArr['success'] == true) {
-            $success = true;
-        }
-
-        return [$success, $responseArr];
     }
 
 
@@ -103,16 +50,30 @@ class Sms {
      * @param string $mobile
      * @param string $content
      * @return array [bool:success, array:responseArr]
-     * @deprecated 
      * @throws \GuzzleHttp\Exception\*
      */
-    public function sendRawContent(string $mobile, string $content):array 
+    public function send(string $mobile, string $content):array 
     {
-        throw new \RuntimeException('不支持');
+        $timestamp = time() * 1000; // ms
+        $sign = md5($this->userName . $timestamp . md5($this->password));
+        $data = [
+            'userName'      => $this->userName,
+            'timestamp'     => $timestamp,
+            'password'      => $this->password,
+            'messageList'   => array(array('phone' => $mobile, 'content' => $content)),
+            'sign'          => $sign,
+        ];
+
+        $response = $this->client->post('api/sendMessageOne', ['json' => $data]);
+
+        $responseArr = json_decode($response->getBody()->getContents(), true);
+        $success = false;
+        if (isset($responseArr['code']) && $responseArr['code'] == 0) {
+            $success = true;
+        }
+        
+        return [$success, $responseArr];
     }
-
-
-
 
 
     /**
@@ -120,26 +81,11 @@ class Sms {
      *
      * @param string $taskid
      * @return array [bool:success, array:responseArr]
+     * @deprecated 
      * @throws \GuzzleHttp\Exception\*
      */
     public function detail(string $taskid, string $mobile):array {        
-        $query = http_build_query([
-            'appId'     => $this->app_id,
-            'timestamp' => time()*1000,
-            'sign'      => hash('sha256', $this->app_id . $this->app_secret . time()*1000),
-            'taskId'    => $taskid,
-            'mobile'    => $mobile
-        ]);
-
-        $response = $this->client->get('/sms/detail?' . $query);
-        $responseArr = json_decode($response->getBody()->getContents(), true);
-        
-        $success = false;
-        if (isset($responseArr['success']) && $responseArr['success'] == true) {
-            $success = true;
-        }
-
-        return [$success, $responseArr];
+        throw new \RuntimeException('该功能未实现');
     }
 
 
@@ -151,25 +97,11 @@ class Sms {
      *
      * @param string $signId 可空，指定短信签名id，留空查询所有
      * @return array [bool:success, array:responseArr]
+     * @deprecated 
      * @throws \GuzzleHttp\Exception\*
      */
     public function getSignList(string $sign_id=''):array {
-        $query = http_build_query([
-            'appId'     => $this->app_id,
-            'timestamp' => time()*1000,
-            'sign'      => hash('sha256', $this->app_id . $this->app_secret . time()*1000),
-            'signId'    => $sign_id,
-        ]);
-
-        $response = $this->client->get('/sms/sign/list?' . $query);
-        $responseArr = json_decode($response->getBody()->getContents(), true);
-
-        $success = false;
-        if (isset($responseArr['success']) && $responseArr['success'] == true) {
-            $success = true;
-        }
-
-        return [$success, $responseArr];
+        throw new \RuntimeException('该功能未实现');
     }
 
 
@@ -182,36 +114,10 @@ class Sms {
      *
      * @param string $template_id 可空，指定查询短信模板，留空查询所有
      * @return array [bool:success, array:responseArr]
+     * @deprecated 
      * @throws \GuzzleHttp\Exception\*
      */
     public function getTemplateList(string $template_id=''):array {
-        $data = [
-            [
-                'name'      => 'appId',
-                'contents'  => $this->app_id,
-            ],
-            [
-                'name'      => 'timestamp',
-                'contents'  => time()*1000,
-            ],
-            [
-                'name'      => 'templateId',
-                'contents'  => $template_id,
-            ],
-            [
-                'name'      => 'sign',
-                'contents'  => hash('sha256', $this->app_id . $this->app_secret . time()*1000)
-            ]
-        ];
-        $response = $this->client->post('/sms/template/list', ['multipart' => $data]);
-
-        $responseArr = json_decode($response->getBody()->getContents(), true);
-
-        $success = false;
-        if (isset($responseArr['success']) && $responseArr['success'] == true) {
-            $success = true;
-        }
-
-        return [$success, $responseArr];
+        throw new \RuntimeException('该功能未实现');
     }
 }
